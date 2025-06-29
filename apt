@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# 危险命令列表（触发备份）
+DANGEROUS_CMDS=("install" "autopurge" "purge" "full-upgrade" "dist-upgrade" "remove")
+
+# 检查当前命令是否需要备份
+need_backup() {
+    for cmd in "${DANGEROUS_CMDS[@]}"; do
+        if [[ "$1" == "$cmd" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# 创建Timeshift快照（移除了--tags参数）
+create_snapshot() {
+    local cmd=$1
+    echo -e "\033[1;33m⚠️  即将执行危险操作: sudo apt $cmd"
+    echo "🔄 正在创建系统快照... (约1-5分钟)\033[0m"
+    
+    TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+    SNAPSHOT_NAME="Pre-APT_${cmd}_${TIMESTAMP}"
+    
+    # 移除了--tags参数
+    if ! sudo timeshift --create --comments "$SNAPSHOT_NAME"; then
+        echo -e "\033[1;31m❌ 快照创建失败！是否继续？ [y/N]\033[0m"
+        read -r confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "操作已取消"
+            exit 1
+        fi
+    fi
+}
+
+# 主逻辑
+if need_backup "$1"; then
+    # 检查Timeshift是否安装
+    if ! command -v timeshift &> /dev/null; then
+        echo -e "\033[1;31m✖ Timeshift未安装！请先安装:"
+        echo "sudo add-apt-repository -y ppa:teejee2008/ppa"
+        echo "sudo apt update && sudo apt install -y timeshift\033[0m"
+        exit 1
+    fi
+    
+    create_snapshot "$1"
+fi
+
+# 执行原始apt命令
+exec /usr/bin/apt.real "$@"
